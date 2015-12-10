@@ -2,6 +2,6 @@
 
 import sys
 import IPython
-from gretis import AsyncConnection
+import gretis
 
 IPython.start_ipython(argv=[])

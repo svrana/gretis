@@ -2,6 +2,13 @@ from __future__ import with_statement
 import datetime
 from select import select
 import socket
+import ssl
+
+import greenlet
+from tornado.iostream import IOStream
+from tornado.iostream import SSLIOStream
+from tornado.ioloop import IOLoop
+
 from redis._compat import iteritems
 from redis.connection import (
     Connection,
@@ -15,25 +22,7 @@ from redis.exceptions import (
     TimeoutError,
     ResponseError,
 )
-from redis.utils import (
-    SSL_AVAILABLE,
-    HIREDIS_AVAILABLE,
-)
 from gretis.exceptions import ConnectionInvalidContext
-from gretis.utils import (
-    GREENLET_AVAILABLE,
-    TORNADO_AVAILABLE,
-)
-
-
-if TORNADO_AVAILABLE:
-    from tornado.iostream import IOStream
-    from tornado.iostream import SSLIOStream
-    from tornado.ioloop import IOLoop
-if GREENLET_AVAILABLE:
-    import greenlet
-if SSL_AVAILABLE:
-    import ssl
 
 
 class AsyncHiredisParser(HiredisParser):
@@ -42,13 +31,6 @@ class AsyncHiredisParser(HiredisParser):
         self._iostream = None
         self._timeout_handle = None
         self._disconnecting = False
-
-        if not HIREDIS_AVAILABLE:
-            raise RedisError("Async parser requires Hiredis")
-        if not GREENLET_AVAILABLE:
-            raise RedisError("Async parser requires Greenlet")
-        if not TORNADO_AVAILABLE:
-            raise RedisError("Async parser requires Tornado")
 
         super(AsyncHiredisParser, self).__init__(socket_read_size)
 
@@ -386,9 +368,6 @@ class AsyncSSLConnection(AsyncConnection):
 
     def __init__(self, ssl_keyfile=None, ssl_certfile=None, ssl_cert_reqs=None,
                  ssl_ca_certs=None, **kwargs):
-        if not SSL_AVAILABLE:
-            raise RedisError("Python wasn't built with SSL support")
-
         if ssl_cert_reqs is None:
             ssl_cert_reqs = ssl.CERT_NONE
         elif isinstance(ssl_cert_reqs, basestring):

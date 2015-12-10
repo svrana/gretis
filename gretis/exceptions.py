@@ -1,4 +1,4 @@
-from redis.exception import RedisError
+from redis.exceptions import RedisError
 
 
 class ConnectionInvalidContext(RedisError):

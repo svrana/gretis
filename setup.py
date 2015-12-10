@@ -10,13 +10,16 @@ f.close()
 
 setup(name='gretis',
       version=__version__,
-      description='Async Redis with Greenlets and Tornado',
+      description='Async Redis connection object using Greenlets and Tornado',
       long_description=long_description,
       url='http://github.com/svrana/gretis',
       author='Shaw Vrana',
       author_email='shaw@vranix.com',
       license='MIT',
       packages=['gretis'],
+      classifiers=[
+        'License :: OSI Approved :: MIT License',
+      ],
       install_requires=[
           'redis',
           'hiredis',

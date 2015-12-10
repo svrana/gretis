@@ -17,7 +17,7 @@ or alternatively (you really should be using pip though):
 
 .. code-block:: bash
 
-    $ sudo easy_install greenredis
+    $ sudo easy_install gretis
 
 or from source:
 
@@ -29,16 +29,17 @@ or from source:
 Getting Started
 ---------------
 
-Create a redis ConnectionPool instructing it to use the Greenredis
+Create a redis ConnectionPool instructing it to use the Gredis
 AsyncConnection as its connection.
 
 
 .. code-block:: pycon
 
     >>> import redis
-    >>> import gretis
+    >>> from gretis.async_connection import AsyncConnection
     >>>
-    >>> pool = redis.ConnectionPool(host='localhost', port=6379, db=0,
+    >>> pool = redis.ConnectionPool(connection_class=AsyncConnection,
+                                    host='localhost', port=6379, db=0,
                                     socket_timeout=1)
     >>> r = redis.StrictRedis(connection_pool=pool)
     >>> r.set('foo', 'bar')
