@@ -1,7 +1,7 @@
 gretis
 ==========
 
-An asyncronous redis::Connection object using Greenlets and Tornado's
+An asynchronous redis::Connection object using Greenlets and Tornado's
 event-loop.
 
 Installation
