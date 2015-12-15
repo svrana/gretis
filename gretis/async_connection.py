@@ -22,8 +22,8 @@ from redis.exceptions import (
     TimeoutError,
     ResponseError,
 )
-from gretis.exceptions import ConnectionInvalidContext
 
+from .exceptions import ConnectionInvalidContext
 
 class AsyncHiredisParser(HiredisParser):
     def __init__(self, socket_read_size):
@@ -138,15 +138,17 @@ class AsyncHiredisParser(HiredisParser):
 
 
 class AsyncConnection(Connection):
-    "Manages TCP communication to and from a Redis server"
+    """
+    Manages TCP communication to and from a Redis server
+    """
     description_format = ("AsyncConnection"
                           "<host=%(host)s,port=%(port)s,db=%(db)s>")
 
-    def __init__(self, parser_class=AsyncHiredisParser,
-                 ioloop = None, *args, **kwargs):
-        super(AsyncConnection, self).__init__(parser_class=parser_class,
-                                              *args, **kwargs)
-        self._ioloop = ioloop or IOLoop.instance()
+    def __init__(self, *args, **kwargs):
+        self._ioloop = kwargs.pop('ioloop', IOLoop.instance())
+        kwargs['parser_class'] = kwargs.pop('parser_class', AsyncHiredisParser)
+        super(AsyncConnection, self).__init__(*args, **kwargs)
+
         self._iostream = None
         self._timeout_handle = None
         self._disconnecting = False
