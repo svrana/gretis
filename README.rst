@@ -29,6 +29,8 @@ or from source:
 Getting Started
 ---------------
 
+With redis-py:
+
 Create a redis ConnectionPool instructing it to use the Gredis
 AsyncConnection as its connection.
 
@@ -46,3 +48,26 @@ AsyncConnection as its connection.
     True
     >>> r.get('foo')
     'bar'
+
+Or with redis-cluster-py:
+
+Create a redis cluster ConnectionPool and give it an AsyncClusterConnection.
+
+
+.. code-block:: pycon
+
+    >>> import redis
+    >>> from gretis.async_cluster_connection import AsyncClusterConnection
+    >>> from rediscluster import ClusterConnectionPool, StrictClusterRedis
+    >>>
+    >>> pool = ClusterConnectionPool(connection_class=AsyncClusterConnection,
+                                     host='localhost', port=700,
+                                     socket_timeout=1)
+    >>> r = StrictRedisCluster(connection_pool=pool,
+                               max_connections=2**31,
+                               socket_timeout=1)
+    >>> r.set('foo', 'bar')
+    True
+    >>> r.get('foo')
+    'bar'
+
