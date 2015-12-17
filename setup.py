@@ -19,6 +19,11 @@ setup(name='gretis',
       packages=['gretis'],
       classifiers=[
         'License :: OSI Approved :: MIT License',
+        'Development Status :: 3 - Alpha',
+        'Intended Audience :: Developers',
+        'Programming Language :: Python :: 2.7',
+        'Topic :: Software Development :: Libraries :: Python Modules',
+
       ],
       install_requires=[
           'redis',
