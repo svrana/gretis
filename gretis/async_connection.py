@@ -1,4 +1,5 @@
 from __future__ import with_statement
+import functools
 import datetime
 from select import select
 import socket
@@ -30,7 +31,6 @@ class AsyncHiredisParser(HiredisParser):
         self._ioloop = None
         self._iostream = None
         self._timeout_handle = None
-        self._disconnecting = False
 
         super(AsyncHiredisParser, self).__init__(socket_read_size)
 
@@ -38,10 +38,13 @@ class AsyncHiredisParser(HiredisParser):
         if self._iostream is None:
             return
 
+        if self._timeout_handle:
+            self._ioloop.remove_timeout(self._timeout_handle)
+            self._timeout_handle = None
+            self._iostream.set_close_callback(None)
+
         self._ioloop = None
         self._iostream = None
-        self._timeout_handle = None
-        self._disconnecting = False
 
         super(AsyncHiredisParser, self).on_disconnect()
 
@@ -51,6 +54,14 @@ class AsyncHiredisParser(HiredisParser):
         self._read_timeout = connection.socket_timeout
 
         super(AsyncHiredisParser, self).on_connect(connection)
+
+    def _handle_read_timeout(self, read_greenlet):
+        read_greenlet.throw(TimeoutError("Timeout reading from socket"))
+
+    def _handle_read_error(self, read_greenlet):
+        """ Connection error, stream is closed """
+        if not read_greenlet.dead:
+            read_greenlet.throw(ConnectionError("Timeout reading from socket"))
 
     def read_response(self):
         if not self._reader:
@@ -62,56 +73,32 @@ class AsyncHiredisParser(HiredisParser):
             self._next_response = False
             return response
 
-        current_greenlet = greenlet.getcurrent()
-
-        def handle_read_timeout():
-            self._iostream.set_close_callback(None)
-            self._iostream._read_callback = None
-            self._disconnecting = True
-            self._timeout_handle = None
-            current_greenlet.switch('timeout', None)
-
-        def handle_read_error():
-            """ Connection error, stream is closed """
-            self._iostream._read_callback = None
-            if self._timeout_handle:
-                self._ioloop.remove_timeout(self._timeout_handle)
-                self._timeout_handle = None
-
-            if self._disconnecting:
-                self._disconnecting = False
-            else:
-                current_greenlet.switch('error', None)
-
-        def handle_read_complete(data):
-            if self._timeout_handle:
-                self._ioloop.remove_timeout(self._timeout_handle)
-                self._timeout_handle = None
-
-            if self._disconnecting:
-                # Read timed-out while a read callback was pending in the
-                # ioloop
-                self._disconnecting = False
-            else:
-                self._iostream.set_close_callback(None)
-                current_greenlet.switch('success', data)
+        current = greenlet.getcurrent()
+        parent = current.parent
 
         response = self._reader.gets()
         while response is False:
             if self._read_timeout:
-                timedelta = datetime.timedelta(seconds=self._read_timeout)
-                self._timeout_handle = self._ioloop.add_timeout(timedelta,
-                    handle_read_timeout)
-            self._iostream.set_close_callback(handle_read_error)
-            self._iostream.read_bytes(self.socket_read_size,
-                                      handle_read_complete,
-                                      partial=True)
-            status, data = current_greenlet.parent.switch()
+                self._timeout_handle = self._ioloop.add_timeout(
+                    datetime.timedelta(seconds=self._read_timeout),
+                    functools.partial(self._handle_read_timeout, current)
+                )
+            self._iostream.set_close_callback(
+                functools.partial(self._handle_read_error, current)
+            )
+            self._iostream.read_bytes(
+                self.socket_read_size,
+                current.switch,
+                partial=True
+            )
+            try:
+                data = parent.switch()
+            finally:
+                if self._timeout_handle:
+                    self._ioloop.remove_timeout(self._timeout_handle)
+                    self._timeout_handle = None
+                self._iostream.set_close_callback(None)
 
-            if status is 'timeout':
-                raise TimeoutError("Timeout reading from socket")
-            if status is 'error':
-                raise ConnectionError("Timeout reading from socket")
             # an empty string indicates the server shutdown the socket
             if not isinstance(data, bytes) or len(data) == 0:
                 raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
@@ -161,6 +148,14 @@ class AsyncConnection(Connection):
             raise ConnectionInvalidContext("Greenlet parent not found, "
                                            "cannot perform async operations")
 
+    def _handle_timeout(self, timeout_greenlet):
+        timeout_greenlet.throw(ConnectionError('Connection timed out'))
+
+    def _handle_error(self, error_greenlet):
+        """ Connection error, stream is closed """
+        if not error_greenlet.dead:
+            error_greenlet.throw(ConnectionError('Error connecting to host'))
+
     def _connect(self):
         "Create a TCP socket connection"
         # we want to mimic what socket.create_connection does to support
@@ -172,41 +167,12 @@ class AsyncConnection(Connection):
             return
 
         err = None
-        current_greenlet = greenlet.getcurrent()
-
-        def handle_timeout():
-            self._iostream.set_close_callback(None)
-            self._iostream._connect_callback = None
-            self._timeout_handle = None
-
-            if self._iostream._pending_callbacks > 0:
-                # There's a close or connect callback pending so we'll let
-                # it either cleanup or connect.  This is not honoring the
-                # timeout. It could be honored by remembering that it timed-out
-                # and handling it in the connect, but that seems
-                # counterproductive.
-                return
-            else:
-                current_greenlet.switch('timeout')
-
-        def handle_error():
-            """ Connection error, stream is closed """
-            self._iostream._connect_callback = None
-            if self._timeout_handle:
-                self._ioloop.remove_timeout(self._timeout_handle)
-                self._timeout_handle = None
-            current_greenlet.switch('error')
-
-        def handle_connected():
-            self._iostream.set_close_callback(None)
-            if self._timeout_handle:
-                self._ioloop.remove_timeout(self._timeout_handle)
-                self._timeout_handle = None
-            current_greenlet.switch('success')
+        current = greenlet.getcurrent()
+        parent = current.parent
 
         for res in socket.getaddrinfo(self.host, self.port, 0,
                                       socket.SOCK_STREAM):
-            family, socktype, proto, canonname, socket_address = res
+            family, socktype, proto, _, socket_address = res
             sock = None
             try:
                 sock = socket.socket(family, socktype, proto)
@@ -223,19 +189,23 @@ class AsyncConnection(Connection):
 
                 timeout = self.socket_connect_timeout
                 if timeout:
-                    timedelta = datetime.timedelta(seconds=timeout)
-                    self._timeout_handle = self._ioloop.add_timeout(timedelta,
-                                                        handle_timeout)
-                self._iostream.set_close_callback(handle_error)
-                self._iostream.connect(socket_address, callback=handle_connected)
+                    self._timeout_handle = self._ioloop.add_timeout(
+                        datetime.timedelta(seconds=timeout),
+                        functools.partial(self._handle_timeout, current),
+                    )
+                self._iostream.set_close_callback(
+                    functools.partial(self._handle_error, current)
+                )
+                self._iostream.connect(socket_address, callback=current.switch)
 
                 # yield back to parent, wait for connect, error or timeout
-                status = current_greenlet.parent.switch()
-                if status == 'error':
-                    raise ConnectionError('Error connecting to host')
-                if status == 'timeout':
-                    raise ConnectionError('Connection timed out')
-
+                try:
+                    parent.switch()
+                finally:
+                    if self._timeout_handle:
+                        self._ioloop.remove_timeout(self._timeout_handle)
+                        self._timeout_handle = None
+                    self._iostream.set_close_callback(None)
                 return sock
             except ConnectionError as _:
                 err = _
@@ -254,28 +224,25 @@ class AsyncConnection(Connection):
         if self._iostream is None:
             return
 
+        if self._timeout_handle:
+            self._ioloop.remove_timeout(self._timeout_handle)
+            self._timeout_handle = None
         self._iostream.set_close_callback(None)
         self._iostream.close()
-
-        if self._iostream._pending_callbacks > 0:
-            current_greenlet = greenlet.getcurrent()
-
-            def handle_disconnect():
-                current_greenlet.switch()
-
-            # There's a pending read/write callback pending in the ioloop. Wait
-            # until it has been called before releasing this connection back to
-            # the connection pool.
-            self._ioloop.add_callback(handle_disconnect)
-            # wait for handle_disconnect callback
-            current_greenlet.parent.switch()
+        self._iostream = None
 
         # This will call into the AsynchiredisParser on_disconnect.
         super(AsyncConnection, self).disconnect()
 
-        self._iostream = None
-        self._timeout_handle = None
-        self._disconnecting = False
+    def _handle_write_timeout(self, write_greenlet):
+        write_greenlet.throw(TimeoutError("Timeout writing to socket"))
+
+    def _handle_write_error(self, write_greenlet):
+        """ Connection error, stream is closed """
+        if not write_greenlet.dead:
+            write_greenlet.throw(
+                ConnectionError("Socket error during write")
+            )
 
     def send_packed_command(self, command):
         "Send an already packed command to the Redis server"
@@ -285,39 +252,8 @@ class AsyncConnection(Connection):
         if not self._iostream:
             self.connect()
 
-        current_greenlet = greenlet.getcurrent()
-
-        def handle_write_timeout():
-            self._timeout_handle = None
-            self._iostream.set_close_callback(None)
-            self._iostream._write_callback = None
-            self._disconnecting = True
-            current_greenlet.switch('timeout')
-
-        def handle_write_error():
-            """ Connection error, stream is closed """
-            self._iostream._write_callback = None
-            if self._timeout_handle:
-                self._ioloop.remove_timeout(self._timeout_handle)
-                self._timeout_handle = None
-
-            if self._disconnecting:
-                self._disconnecting = False
-            else:
-                current_greenlet.switch('error')
-
-        def handle_write_complete():
-            if self._timeout_handle:
-                self._ioloop.remove_timeout(self._timeout_handle)
-                self._timeout_handle = None
-
-            if self._disconnecting:
-                # write timeout must have fired while the write callback was
-                # pending
-                self._disconnecting = False
-            else:
-                self._iostream.set_close_callback(None)
-                current_greenlet.switch('success')
+        current = greenlet.getcurrent()
+        parent = current.parent
 
         try:
             if isinstance(command, str):
@@ -325,21 +261,28 @@ class AsyncConnection(Connection):
             ncmds = len(command)
             for i, item in enumerate(command):
                 if i == (ncmds-1):
-                    cb = handle_write_complete
-                    self._iostream.set_close_callback(handle_write_error)
-                    timedelta = datetime.timedelta(seconds=self.socket_timeout)
-                    self._timeout_handle = self._ioloop.add_timeout(timedelta,
-                                                      handle_write_timeout)
+                    cb = current.switch
+                    self._iostream.set_close_callback(
+                        functools.partial(self._handle_write_error, current)
+                    )
+
+                    self._timeout_handle = self._ioloop.add_timeout(
+                        datetime.timedelta(seconds=self.socket_timeout),
+                        functools.partial(self._handle_write_timeout, current)
+                    )
                 else:
                     cb = None
 
                 self._iostream.write(item, callback=cb)
 
-            status = current_greenlet.parent.switch()
-            if status == 'timeout':
-                raise TimeoutError("Timeout writing to socket")
-            if status == 'error':
-                raise ConnectionError("Socket error during write")
+            try:
+                parent.switch()
+            finally:
+                if self._timeout_handle:
+                    self._ioloop.remove_timeout(self._timeout_handle)
+                    self._timeout_handle = None
+
+                self._iostream.set_close_callback(None)
         except:
             self.disconnect()
             raise
