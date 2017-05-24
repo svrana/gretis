@@ -31,6 +31,7 @@ class AsyncHiredisParser(HiredisParser):
         self._ioloop = None
         self._iostream = None
         self._timeout_handle = None
+        self._events = {}
 
         super(AsyncHiredisParser, self).__init__(socket_read_size)
 
@@ -58,10 +59,14 @@ class AsyncHiredisParser(HiredisParser):
     def _handle_read_timeout(self, read_greenlet):
         read_greenlet.throw(TimeoutError("Timeout reading from socket"))
 
-    def _handle_read_error(self, read_greenlet):
+    def _handle_read_error(self, read_greenlet, handle):
         """ Connection error, stream is closed """
-        if not read_greenlet.dead:
+        if handle in self._events and not read_greenlet.dead:
             read_greenlet.throw(ConnectionError("Timeout reading from socket"))
+
+    def _handle_read_complete(self, read_greenlet, handle, data):
+        if handle in self._events and not read_greenlet.dead:
+            read_greenlet.switch(data)
 
     def read_response(self):
         if not self._reader:
@@ -78,17 +83,20 @@ class AsyncHiredisParser(HiredisParser):
 
         response = self._reader.gets()
         while response is False:
+            handle = datetime.datetime.now().strftime('%s')
+            self._events[handle] = True
+            self._iostream.set_close_callback(
+                functools.partial(self._handle_read_error, current, handle)
+            )
+
             if self._read_timeout:
                 self._timeout_handle = self._ioloop.add_timeout(
                     datetime.timedelta(seconds=self._read_timeout),
                     functools.partial(self._handle_read_timeout, current)
                 )
-            self._iostream.set_close_callback(
-                functools.partial(self._handle_read_error, current)
-            )
             self._iostream.read_bytes(
                 self.socket_read_size,
-                current.switch,
+                functools.partial(self._handle_read_complete, current, handle),
                 partial=True
             )
             try:
@@ -97,7 +105,9 @@ class AsyncHiredisParser(HiredisParser):
                 if self._timeout_handle:
                     self._ioloop.remove_timeout(self._timeout_handle)
                     self._timeout_handle = None
+
                 self._iostream.set_close_callback(None)
+                del self._events[handle]
 
             # an empty string indicates the server shutdown the socket
             if not isinstance(data, bytes) or len(data) == 0:
@@ -138,6 +148,7 @@ class AsyncConnection(Connection):
 
         self._iostream = None
         self._timeout_handle = None
+        self._events = {}
 
     def _wrap_socket(self, sock):
         return IOStream(sock)
@@ -151,10 +162,14 @@ class AsyncConnection(Connection):
     def _handle_timeout(self, timeout_greenlet):
         timeout_greenlet.throw(ConnectionError('Connection timed out'))
 
-    def _handle_error(self, error_greenlet):
+    def _handle_error(self, error_greenlet, handle):
         """ Connection error, stream is closed """
-        if not error_greenlet.dead:
+        if handle in self._events and not error_greenlet.dead:
             error_greenlet.throw(ConnectionError('Error connecting to host'))
+
+    def _handle_connect(self, connect_greenlet, handle):
+        if handle in self._events and not connect_greenlet.dead:
+            connect_greenlet.switch()
 
     def _connect(self):
         "Create a TCP socket connection"
@@ -191,10 +206,16 @@ class AsyncConnection(Connection):
                         datetime.timedelta(seconds=timeout),
                         functools.partial(self._handle_timeout, current),
                     )
+
+                handle = datetime.datetime.now().strftime('%s')
+                self._events[handle] = True
                 self._iostream.set_close_callback(
-                    functools.partial(self._handle_error, current)
+                    functools.partial(self._handle_error, current, handle)
                 )
-                self._iostream.connect(socket_address, callback=current.switch)
+                self._iostream.connect(
+                    socket_address,
+                    callback=functools.partial(self._handle_connect, current, handle)
+                )
 
                 # yield back to parent, wait for connect, error or timeout
                 try:
@@ -204,6 +225,7 @@ class AsyncConnection(Connection):
                         self._ioloop.remove_timeout(self._timeout_handle)
                         self._timeout_handle = None
                     self._iostream.set_close_callback(None)
+                    del self._events[handle]
                 return sock
             except ConnectionError as _:
                 err = _
@@ -235,30 +257,37 @@ class AsyncConnection(Connection):
     def _handle_write_timeout(self, write_greenlet):
         write_greenlet.throw(TimeoutError("Timeout writing to socket"))
 
-    def _handle_write_error(self, write_greenlet):
+    def _handle_write_error(self, write_greenlet, handle):
         """ Connection error, stream is closed """
-        if not write_greenlet.dead:
+        if handle in self._events and not write_greenlet.dead:
             write_greenlet.throw(
                 ConnectionError("Socket error during write")
             )
 
+    def _handle_write_complete(self, write_greenlet, handle):
+        if handle in self._events and not write_greenlet.dead:
+            write_greenlet.switch()
+
     def send_packed_command(self, command):
         "Send an already packed command to the Redis server"
         current = self._get_current_greenlet()
-        parent = current.parent()
+        parent = current.parent
 
         if not self._iostream:
             self.connect()
 
         try:
+            handle = datetime.datetime.now().strftime('%s')
+            self._events[handle] = True
+
             if isinstance(command, str):
                 command = [command]
             ncmds = len(command)
             for i, item in enumerate(command):
                 if i == (ncmds-1):
-                    cb = current.switch
+                    cb = functools.partial(self._handle_write_complete, current, handle)
                     self._iostream.set_close_callback(
-                        functools.partial(self._handle_write_error, current)
+                        functools.partial(self._handle_write_error, current, handle)
                     )
 
                     self._timeout_handle = self._ioloop.add_timeout(
@@ -276,8 +305,9 @@ class AsyncConnection(Connection):
                 if self._timeout_handle:
                     self._ioloop.remove_timeout(self._timeout_handle)
                     self._timeout_handle = None
-
                 self._iostream.set_close_callback(None)
+                del self._events[handle]
+
         except:
             self.disconnect()
             raise
