@@ -138,7 +138,6 @@ class AsyncConnection(Connection):
 
         self._iostream = None
         self._timeout_handle = None
-        self._disconnecting = False
 
     def _wrap_socket(self, sock):
         return IOStream(sock)
