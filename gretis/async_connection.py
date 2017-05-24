@@ -41,7 +41,7 @@ class AsyncHiredisParser(HiredisParser):
         if self._timeout_handle:
             self._ioloop.remove_timeout(self._timeout_handle)
             self._timeout_handle = None
-            self._iostream.set_close_callback(None)
+        self._iostream.set_close_callback(None)
 
         self._ioloop = None
         self._iostream = None
