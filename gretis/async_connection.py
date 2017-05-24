@@ -142,10 +142,11 @@ class AsyncConnection(Connection):
     def _wrap_socket(self, sock):
         return IOStream(sock)
 
-    def _maybe_raise_no_greenlet_parent(self):
+    def _get_current_greenlet(self):
         if greenlet.getcurrent().parent is None:
             raise ConnectionInvalidContext("Greenlet parent not found, "
                                            "cannot perform async operations")
+        return greenlet.getcurrent()
 
     def _handle_timeout(self, timeout_greenlet):
         timeout_greenlet.throw(ConnectionError('Connection timed out'))
@@ -160,15 +161,13 @@ class AsyncConnection(Connection):
         # we want to mimic what socket.create_connection does to support
         # ipv4/ipv6, but we want to set options prior to calling
         # socket.connect()
-        self._maybe_raise_no_greenlet_parent()
-
         if self._iostream:
             return
 
-        err = None
-        current = greenlet.getcurrent()
+        current = self._get_current_greenlet()
         parent = current.parent
 
+        err = None
         for res in socket.getaddrinfo(self.host, self.port, 0,
                                       socket.SOCK_STREAM):
             family, socktype, proto, _, socket_address = res
@@ -245,14 +244,11 @@ class AsyncConnection(Connection):
 
     def send_packed_command(self, command):
         "Send an already packed command to the Redis server"
-
-        self._maybe_raise_no_greenlet_parent()
+        current = self._get_current_greenlet()
+        parent = current.parent()
 
         if not self._iostream:
             self.connect()
-
-        current = greenlet.getcurrent()
-        parent = current.parent
 
         try:
             if isinstance(command, str):
@@ -290,7 +286,9 @@ class AsyncConnection(Connection):
         "Check if there's any data that can be read"
         if not self._iostream:
             self.connect()
-        self._maybe_raise_no_greenlet_noparent()
+
+        current = self._get_current_greenlet()
+        parent = current.parent
 
         def check_for_data():
             if (self._parser.can_read() or
@@ -301,8 +299,8 @@ class AsyncConnection(Connection):
         if timeout is 0:
             return check_for_data()
         else:
-            self._ioloop.call_later(timeout, greenlet.getcurrent().switch)
-            greenlet.getcurrent().parent.switch()
+            self._ioloop.call_later(timeout, current.switch)
+            parent.switch()
             return check_for_data()
 
 
