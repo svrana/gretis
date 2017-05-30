@@ -4,6 +4,7 @@ import datetime
 from select import select
 import socket
 import ssl
+import uuid
 
 import greenlet
 from tornado.iostream import IOStream
@@ -25,6 +26,10 @@ from redis.exceptions import (
 )
 
 from .exceptions import ConnectionInvalidContext
+
+def generate_handle():
+    return str(uuid.uuid4())
+
 
 class AsyncHiredisParser(HiredisParser):
     def __init__(self, socket_read_size):
@@ -83,7 +88,7 @@ class AsyncHiredisParser(HiredisParser):
 
         response = self._reader.gets()
         while response is False:
-            handle = datetime.datetime.now().strftime('%s')
+            handle = generate_handle()
             self._events[handle] = True
             self._iostream.set_close_callback(
                 functools.partial(self._handle_read_error, current, handle)
@@ -207,7 +212,7 @@ class AsyncConnection(Connection):
                         functools.partial(self._handle_timeout, current),
                     )
 
-                handle = datetime.datetime.now().strftime('%s')
+                handle = generate_handle()
                 self._events[handle] = True
                 self._iostream.set_close_callback(
                     functools.partial(self._handle_error, current, handle)
