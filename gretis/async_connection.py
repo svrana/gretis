@@ -282,7 +282,7 @@ class AsyncConnection(Connection):
             self.connect()
 
         try:
-            handle = datetime.datetime.now().strftime('%s')
+            handle = generate_handle()
             self._events[handle] = True
 
             if isinstance(command, str):
