@@ -285,24 +285,17 @@ class AsyncConnection(Connection):
             handle = generate_handle()
             self._events[handle] = True
 
-            if isinstance(command, str):
-                command = [command]
-            ncmds = len(command)
-            for i, item in enumerate(command):
-                if i == (ncmds-1):
-                    cb = functools.partial(self._handle_write_complete, current, handle)
-                    self._iostream.set_close_callback(
-                        functools.partial(self._handle_write_error, current, handle)
-                    )
-
-                    self._timeout_handle = self._ioloop.add_timeout(
-                        datetime.timedelta(seconds=self.socket_timeout),
-                        functools.partial(self._handle_write_timeout, current)
-                    )
-                else:
-                    cb = None
-
-                self._iostream.write(item, callback=cb)
+            self._iostream.set_close_callback(
+                functools.partial(self._handle_write_error, current, handle)
+            )
+            cb = functools.partial(self._handle_write_complete, current, handle)
+            self._timeout_handle = self._ioloop.add_timeout(
+                datetime.timedelta(seconds=self.socket_timeout),
+                functools.partial(self._handle_write_timeout, current)
+            )
+            # command is always a list
+            cmd_str = ''.join(command)
+            self._iostream.write(cmd_str, callback=cb)
 
             try:
                 parent.switch()
