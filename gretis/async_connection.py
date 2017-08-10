@@ -297,7 +297,7 @@ class AsyncConnection(Connection):
             try:
                 self._iostream.write(cmd_str, callback=cb)
                 parent.switch()
-            except IOError, e:
+            except IOError as e:
                 # When connection closed tornado will throw an IOError
                 # with the text 'Stream is closed'
                 raise ConnectionError(str(e))
