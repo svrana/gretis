@@ -99,12 +99,12 @@ class AsyncHiredisParser(HiredisParser):
                     datetime.timedelta(seconds=self._read_timeout),
                     functools.partial(self._handle_read_timeout, current)
                 )
-            self._iostream.read_bytes(
-                self.socket_read_size,
-                functools.partial(self._handle_read_complete, current, handle),
-                partial=True
-            )
             try:
+                self._iostream.read_bytes(
+                    self.socket_read_size,
+                    functools.partial(self._handle_read_complete, current, handle),
+                    partial=True
+                )
                 data = parent.switch()
             finally:
                 if self._timeout_handle:
@@ -217,13 +217,12 @@ class AsyncConnection(Connection):
                 self._iostream.set_close_callback(
                     functools.partial(self._handle_error, current, handle)
                 )
-                self._iostream.connect(
-                    socket_address,
-                    callback=functools.partial(self._handle_connect, current, handle)
-                )
-
-                # yield back to parent, wait for connect, error or timeout
                 try:
+                    self._iostream.connect(
+                        socket_address,
+                        callback=functools.partial(self._handle_connect, current, handle)
+                    )
+                    # yield back to parent, wait for connect, error or timeout
                     parent.switch()
                 finally:
                     if self._timeout_handle:
@@ -295,9 +294,8 @@ class AsyncConnection(Connection):
             )
             # command is always a list
             cmd_str = ''.join(command)
-            self._iostream.write(cmd_str, callback=cb)
-
             try:
+                self._iostream.write(cmd_str, callback=cb)
                 parent.switch()
             finally:
                 if self._timeout_handle:
