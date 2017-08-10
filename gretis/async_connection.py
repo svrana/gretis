@@ -147,7 +147,7 @@ class AsyncConnection(Connection):
                           "<host=%(host)s,port=%(port)s,db=%(db)s>")
 
     def __init__(self, *args, **kwargs):
-        self._ioloop = kwargs.pop('ioloop', IOLoop.instance())
+        self._ioloop = kwargs.pop('ioloop', IOLoop.current())
         kwargs['parser_class'] = kwargs.pop('parser_class', AsyncHiredisParser)
         super(AsyncConnection, self).__init__(*args, **kwargs)
 
