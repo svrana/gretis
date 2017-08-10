@@ -27,5 +27,5 @@ install:
 	python setup.py install
 
 publish:
-	python setup.py sdist register upload
+	python setup.py sdist upload
 
