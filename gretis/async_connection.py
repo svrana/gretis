@@ -106,6 +106,10 @@ class AsyncHiredisParser(HiredisParser):
                     partial=True
                 )
                 data = parent.switch()
+            except IOError as e:
+                # When connection closed tornado will throw an IOError
+                # with the text 'Stream is closed'
+                raise ConnectionError(str(e))
             finally:
                 if self._timeout_handle:
                     self._ioloop.remove_timeout(self._timeout_handle)
