@@ -13,26 +13,15 @@ To install gretis, simply:
 
     $ sudo pip install gretis
 
-or alternatively (you really should be using pip though):
-
-.. code-block:: bash
-
-    $ sudo easy_install gretis
-
-or from source:
-
-.. code-block:: bash
-
-    $ sudo python setup.py install
-
-
 Getting Started
 ---------------
 
 With redis-py:
 
 Create a redis ConnectionPool instructing it to use the Gredis
-AsyncConnection as its connection.
+AsyncConnection as its connection. You must have a parent greenlet
+or you will get an exception. (Examples assume you are in greenlet
+context already)
 
 
 .. code-block:: pycon
@@ -53,7 +42,6 @@ Or with redis-cluster-py:
 
 Create a redis cluster ConnectionPool and give it an AsyncClusterConnection.
 
-
 .. code-block:: pycon
 
     >>> import redis
@@ -70,4 +58,3 @@ Create a redis cluster ConnectionPool and give it an AsyncClusterConnection.
     True
     >>> r.get('foo')
     'bar'
-
