@@ -1,12 +1,20 @@
 #!/usr/bin/env python
-import os
+
 from setuptools import setup
 from gretis import __version__
 
+try:
+    import pypandoc  # also requires the pandoc package
+    long_description = pypandoc.convert('README.md', 'rst')
+except Exception:
+    f = open('README.md')
+    long_description = f.read()
+    f.close()
 
-f = open(os.path.join(os.path.dirname(__file__), 'README.rst'))
-long_description = f.read()
-f.close()
+dev_requires = [
+    'pypandoc',
+    'pylint',
+]
 
 setup(name='gretis',
       version=__version__,
@@ -32,4 +40,7 @@ setup(name='gretis',
           'greenlet',
       ],
       zip_safe=False,
-      )
+      extras_require={
+          'dev': dev_requires,
+      },
+)
