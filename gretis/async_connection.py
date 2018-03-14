@@ -252,13 +252,15 @@ class AsyncConnection(Connection):
         if self._iostream is None:
             return
 
-        if self._timeout_handle:
-            self._ioloop.remove_timeout(self._timeout_handle)
-            self._timeout_handle = None
-        self._iostream.set_close_callback(None)
-        self._iostream.close()
+        try:
+            if self._timeout_handle:
+                self._ioloop.remove_timeout(self._timeout_handle)
+                self._timeout_handle = None
+            self._iostream.set_close_callback(None)
+            self._iostream.close()
+        except socket.error:
+            pass
         self._iostream = None
-
         # This will call into the AsynchiredisParser on_disconnect.
         super(AsyncConnection, self).disconnect()
 
